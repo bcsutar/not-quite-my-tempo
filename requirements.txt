@@ -1,0 +1,12 @@
+# Tested working combination: Python 3.12 + mediapipe 0.10.14.
+#
+# IMPORTANT: mediapipe 0.10.30+ dropped/broke the classic `mp.solutions` API
+# this project uses, and has no wheels for Python 3.13/3.14. Stick to the
+# versions below. Create your venv with Python 3.12:
+#     python3.12 -m venv .venv && source .venv/bin/activate
+#
+mediapipe==0.10.14
+opencv-python==4.11.0.86
+numpy<2
+pynput>=1.7        # sending the Esc keystroke
+rumps>=0.4         # macOS menu bar app (python -m tempo.tray)

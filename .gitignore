@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+assets/*.gif
+build/
+dist/
+.build-venv/
+.swift-module-cache/
+*.app/
+*.spec
+*.egg-info/

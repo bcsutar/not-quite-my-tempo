@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "not-quite-my-tempo"
+version = "1.0.0"
+description = "A webcam gesture that cuts off AI when it is not quite your tempo"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Balazs Csutar" }]
+dependencies = [
+    "mediapipe==0.10.14",
+    "opencv-python==4.11.0.86",
+    "numpy<2",
+    "pynput>=1.7",
+    "rumps>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/bcsutar/not-quite-my-tempo"
+Repository = "https://github.com/bcsutar/not-quite-my-tempo"
+
+[project.scripts]
+not-quite-my-tempo = "tempo.main:main"
+not-quite-my-tempo-tray = "tempo.tray:main"
+
+[tool.setuptools.packages.find]
+include = ["tempo*"]
