@@ -136,6 +136,10 @@ def main():
                     help="focused macOS app to interrupt (default: ChatGPT)")
     ap.add_argument("--camera", type=int, default=0)
     args = ap.parse_args()
+    # AVFoundation must request Camera permission from the main thread. The
+    # actual frame loop can then safely run in the worker thread below.
+    camera = cv2.VideoCapture(args.camera)
+    camera.release()
     TempoTray(args.app, args.camera).run()
 
 

@@ -139,9 +139,9 @@ Remove it with:
 ./scripts/uninstall_launch_agent.sh
 ```
 
-Logs are written to `~/Library/Logs/NotQuiteMyTempo/`. The first launch still
-needs Camera and Accessibility permission under **System Settings > Privacy &
-Security**.
+Logs are written to `~/Library/Logs/NotQuiteMyTempo/`. The first launch requests
+Camera permission and still needs Accessibility permission under **System
+Settings > Privacy & Security**.
 
 ## Build the installer
 

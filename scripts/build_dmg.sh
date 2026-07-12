@@ -49,12 +49,20 @@ pyinstaller \
   "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || \
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" \
     "$APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string Not Quite My Tempo uses your camera to detect the cutoff gesture" \
+  "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || \
+  /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription Not Quite My Tempo uses your camera to detect the cutoff gesture" \
+    "$APP_BUNDLE/Contents/Info.plist"
 
 if [[ -n "$CODESIGN_IDENTITY" ]]; then
   codesign --force --timestamp --options runtime --deep \
     --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE"
-  codesign --verify --deep --strict "$APP_BUNDLE"
+else
+  # Ad-hoc signing keeps local builds launchable after removing download
+  # quarantine, while Developer ID signing remains available for releases.
+  codesign --force --deep --sign - "$APP_BUNDLE"
 fi
+codesign --verify --deep --strict "$APP_BUNDLE"
 
 STAGE_DIR="$DIST_DIR/dmg"
 mkdir -p "$STAGE_DIR"
