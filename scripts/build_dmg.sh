@@ -36,6 +36,7 @@ pyinstaller \
   --windowed \
   --name "Not Quite My Tempo" \
   --osx-bundle-identifier "$BUNDLE_ID" \
+  --collect-data mediapipe \
   "$REPO_DIR/tray_launcher.py"
 
 /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" \

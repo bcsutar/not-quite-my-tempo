@@ -19,6 +19,8 @@ app) under System Settings -> Privacy & Security.
 from __future__ import annotations
 
 import argparse
+import logging
+from pathlib import Path
 import threading
 import time
 
@@ -39,63 +41,32 @@ IDLE_TITLE = "\U0001F941 tempo"          # 🥁 tempo
 FLASH_TITLE = "\U0001F6AB NOT MY TEMPO!"  # 🚫 NOT MY TEMPO!
 FLASH_SECONDS = 1.2
 
-
-def request_camera_access() -> bool:
-    """Ask macOS for Camera access before OpenCV starts its worker thread."""
-    try:
-        from AVFoundation import (
-            AVAuthorizationStatusAuthorized,
-            AVAuthorizationStatusNotDetermined,
-            AVCaptureDevice,
-            AVMediaTypeVideo,
-        )
-        from Foundation import NSDate, NSRunLoop
-    except ImportError:
-        # Source installs without PyObjC can still rely on OpenCV's prompt.
-        camera = cv2.VideoCapture(0)
-        authorized = camera.isOpened()
-        camera.release()
-        return authorized
-
-    status = AVCaptureDevice.authorizationStatusForMediaType_(AVMediaTypeVideo)
-    if status == AVAuthorizationStatusAuthorized:
-        return True
-    if status != AVAuthorizationStatusNotDetermined:
-        return False
-
-    completed = threading.Event()
-    result = {"granted": False}
-
-    def permission_result(granted):
-        result["granted"] = bool(granted)
-        completed.set()
-
-    AVCaptureDevice.requestAccessForMediaType_completionHandler_(
-        AVMediaTypeVideo, permission_result
-    )
-    while not completed.wait(0.05):
-        NSRunLoop.currentRunLoop().runUntilDate_(
-            NSDate.dateWithTimeIntervalSinceNow_(0.05)
-        )
-    return result["granted"]
-
+LOG_DIR = Path.home() / "Library" / "Logs" / "NotQuiteMyTempo"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    filename=LOG_DIR / "app.log",
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 class TempoTray(rumps.App):
-    def __init__(self, app_name: str, camera: int, camera_authorized: bool):
+    def __init__(self, app_name: str, camera: int):
         super().__init__(IDLE_TITLE, quit_button=None)
         self.app_name = app_name
         self.camera = camera
 
         self.controller = AppController(app_name=app_name, key="esc")
-        self.detector = CutoffDetector()
+        self.detector = None
 
         self.paused = False
         self.running = True
         self.cut_count = 0
         self._flash_until = 0.0
-        self._status = (
-            "starting camera..." if camera_authorized else "camera permission denied"
-        )
+        self._status = "requesting camera permission..."
+        self._camera_started = False
+        self._camera_start_pending = False
+        self._permission_callback = None
 
         # menu
         self.status_item = rumps.MenuItem("Status: starting...")
@@ -109,19 +80,73 @@ class TempoTray(rumps.App):
             rumps.MenuItem("Quit", callback=self.quit_app),
         ]
 
-        # background camera thread
+        # Start the macOS event loop first. Asking for Camera permission before
+        # NSApplication is running can leave a menu-bar-only app suspended.
         self._thread = None
-        if camera_authorized:
-            self._thread = threading.Thread(target=self._loop, daemon=True)
-            self._thread.start()
+        self._permission_timer = rumps.Timer(self._request_camera_permission, 0.5)
+        self._permission_timer.start()
 
         # a timer on the main thread updates the title/menu (rumps is not
         # thread-safe, so all UI changes happen here)
         self._ui_timer = rumps.Timer(self._tick, 0.15)
         self._ui_timer.start()
+        logger.info("Tray initialized; waiting for Camera permission")
+
+    def _request_camera_permission(self, _):
+        self._permission_timer.stop()
+        try:
+            from AVFoundation import (
+                AVAuthorizationStatusAuthorized,
+                AVAuthorizationStatusNotDetermined,
+                AVCaptureDevice,
+                AVMediaTypeVideo,
+            )
+        except ImportError:
+            logger.exception("AVFoundation is unavailable")
+            self._status = "camera support unavailable"
+            return
+
+        status = AVCaptureDevice.authorizationStatusForMediaType_(AVMediaTypeVideo)
+        logger.info("Camera authorization status: %s", status)
+        if status == AVAuthorizationStatusAuthorized:
+            self._start_camera()
+            return
+        if status != AVAuthorizationStatusNotDetermined:
+            self._status = "camera permission denied"
+            return
+
+        self._permission_callback = self._camera_permission_result
+        AVCaptureDevice.requestAccessForMediaType_completionHandler_(
+            AVMediaTypeVideo, self._permission_callback
+        )
+
+    def _camera_permission_result(self, granted):
+        logger.info("Camera permission result: %s", bool(granted))
+        if granted:
+            # AVFoundation invokes this callback on a private queue. Let the
+            # main-thread UI timer open OpenCV's AVFoundation capture session.
+            self._camera_start_pending = True
+        else:
+            self._status = "camera permission denied"
+
+    def _start_camera(self):
+        if self._camera_started:
+            return
+        self._camera_started = True
+        self._status = "starting camera..."
+        cap = cv2.VideoCapture(self.camera)
+        if not cap.isOpened():
+            self._status = f"camera {self.camera} unavailable"
+            logger.error("Camera %s failed to open", self.camera)
+            return
+        self._thread = threading.Thread(target=self._loop, args=(cap,), daemon=True)
+        self._thread.start()
 
     # ---- UI (main thread only) ------------------------------------------
     def _tick(self, _):
+        if self._camera_start_pending:
+            self._camera_start_pending = False
+            self._start_camera()
         if time.time() < self._flash_until:
             self.title = FLASH_TITLE
         else:
@@ -139,13 +164,11 @@ class TempoTray(rumps.App):
         rumps.quit_application()
 
     # ---- camera loop (background thread) --------------------------------
-    def _loop(self):
-        cap = cv2.VideoCapture(self.camera)
-        if not cap.isOpened():
-            self._status = f"camera {self.camera} unavailable"
-            return
-        self._status = "watching"
+    def _loop(self, cap):
         try:
+            self.detector = CutoffDetector()
+            self._status = "watching"
+            logger.info("Camera %s opened; detector is watching", self.camera)
             while self.running:
                 if self.paused:
                     time.sleep(0.1)
@@ -169,9 +192,13 @@ class TempoTray(rumps.App):
                     self.controller.stop()           # Esc, only if app focused
                     self.cut_count += 1
                     self._flash_until = time.time() + FLASH_SECONDS
+        except Exception:
+            self._status = "detector failed - see app.log"
+            logger.exception("Camera worker failed")
         finally:
             cap.release()
-            self.detector.close()
+            if self.detector is not None:
+                self.detector.close()
 
 
 def main():
@@ -179,9 +206,15 @@ def main():
     ap.add_argument("--app", default="ChatGPT",
                     help="focused macOS app to interrupt (default: ChatGPT)")
     ap.add_argument("--camera", type=int, default=0)
+    ap.add_argument("--check-detector", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
-    camera_authorized = request_camera_access()
-    TempoTray(args.app, args.camera, camera_authorized).run()
+    if args.check_detector:
+        detector = CutoffDetector()
+        detector.close()
+        logger.info("Packaged detector smoke test passed")
+        return
+    logger.info("Launching tray for app=%s camera=%s", args.app, args.camera)
+    TempoTray(args.app, args.camera).run()
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "not-quite-my-tempo"
-version = "1.0.0"
+version = "1.0.1"
 description = "A webcam gesture that cuts off AI when it is not quite your tempo"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
