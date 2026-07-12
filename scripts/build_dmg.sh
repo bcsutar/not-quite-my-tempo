@@ -16,6 +16,7 @@ MOUNT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/not-quite-my-tempo-dmg.XXXXXX")"
 
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
+ENTITLEMENTS_PATH="${CODESIGN_ENTITLEMENTS:-$REPO_DIR/scripts/entitlements.plist}"
 
 cleanup() {
   hdiutil detach "$MOUNT_DIR" -force -quiet 2>/dev/null || true
@@ -56,11 +57,13 @@ pyinstaller \
 
 if [[ -n "$CODESIGN_IDENTITY" ]]; then
   codesign --force --timestamp --options runtime --deep \
+    --entitlements "$ENTITLEMENTS_PATH" \
     --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE"
 else
   # Ad-hoc signing keeps local builds launchable after removing download
   # quarantine, while Developer ID signing remains available for releases.
-  codesign --force --deep --sign - "$APP_BUNDLE"
+  codesign --force --deep --entitlements "$ENTITLEMENTS_PATH" \
+    --sign - "$APP_BUNDLE"
 fi
 codesign --verify --deep --strict "$APP_BUNDLE"
 

@@ -10,3 +10,4 @@ opencv-python==4.11.0.86
 numpy<2
 pynput>=1.7        # sending the Esc keystroke
 rumps>=0.4         # macOS menu bar app (python -m tempo.tray)
+pyobjc-framework-AVFoundation>=12.2.1; sys_platform == "darwin"

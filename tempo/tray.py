@@ -40,8 +40,48 @@ FLASH_TITLE = "\U0001F6AB NOT MY TEMPO!"  # 🚫 NOT MY TEMPO!
 FLASH_SECONDS = 1.2
 
 
+def request_camera_access() -> bool:
+    """Ask macOS for Camera access before OpenCV starts its worker thread."""
+    try:
+        from AVFoundation import (
+            AVAuthorizationStatusAuthorized,
+            AVAuthorizationStatusNotDetermined,
+            AVCaptureDevice,
+            AVMediaTypeVideo,
+        )
+        from Foundation import NSDate, NSRunLoop
+    except ImportError:
+        # Source installs without PyObjC can still rely on OpenCV's prompt.
+        camera = cv2.VideoCapture(0)
+        authorized = camera.isOpened()
+        camera.release()
+        return authorized
+
+    status = AVCaptureDevice.authorizationStatusForMediaType_(AVMediaTypeVideo)
+    if status == AVAuthorizationStatusAuthorized:
+        return True
+    if status != AVAuthorizationStatusNotDetermined:
+        return False
+
+    completed = threading.Event()
+    result = {"granted": False}
+
+    def permission_result(granted):
+        result["granted"] = bool(granted)
+        completed.set()
+
+    AVCaptureDevice.requestAccessForMediaType_completionHandler_(
+        AVMediaTypeVideo, permission_result
+    )
+    while not completed.wait(0.05):
+        NSRunLoop.currentRunLoop().runUntilDate_(
+            NSDate.dateWithTimeIntervalSinceNow_(0.05)
+        )
+    return result["granted"]
+
+
 class TempoTray(rumps.App):
-    def __init__(self, app_name: str, camera: int):
+    def __init__(self, app_name: str, camera: int, camera_authorized: bool):
         super().__init__(IDLE_TITLE, quit_button=None)
         self.app_name = app_name
         self.camera = camera
@@ -53,7 +93,9 @@ class TempoTray(rumps.App):
         self.running = True
         self.cut_count = 0
         self._flash_until = 0.0
-        self._status = "starting camera..."
+        self._status = (
+            "starting camera..." if camera_authorized else "camera permission denied"
+        )
 
         # menu
         self.status_item = rumps.MenuItem("Status: starting...")
@@ -68,8 +110,10 @@ class TempoTray(rumps.App):
         ]
 
         # background camera thread
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
+        self._thread = None
+        if camera_authorized:
+            self._thread = threading.Thread(target=self._loop, daemon=True)
+            self._thread.start()
 
         # a timer on the main thread updates the title/menu (rumps is not
         # thread-safe, so all UI changes happen here)
@@ -136,11 +180,8 @@ def main():
                     help="focused macOS app to interrupt (default: ChatGPT)")
     ap.add_argument("--camera", type=int, default=0)
     args = ap.parse_args()
-    # AVFoundation must request Camera permission from the main thread. The
-    # actual frame loop can then safely run in the worker thread below.
-    camera = cv2.VideoCapture(args.camera)
-    camera.release()
-    TempoTray(args.app, args.camera).run()
+    camera_authorized = request_camera_access()
+    TempoTray(args.app, args.camera, camera_authorized).run()
 
 
 if __name__ == "__main__":

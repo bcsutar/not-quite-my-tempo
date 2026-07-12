@@ -15,6 +15,7 @@ dependencies = [
     "opencv-python==4.11.0.86",
     "numpy<2",
     "pynput>=1.7",
+    "pyobjc-framework-AVFoundation>=12.2.1; sys_platform == 'darwin'",
     "rumps>=0.4",
 ]
 
